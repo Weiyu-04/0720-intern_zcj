@@ -4,8 +4,12 @@
 
 **为什么要有它**：SKILL 第4步原来让模型“手工把 table2 和 table3_groups 合并成
 一份 JSON”。手写/重排大段中文正文时，模型很容易把报告里的引号写成未转义的半角 "，
-导致后续 json.load 失败。用脚本合并，两份输入都由确定性脚本产出（json.dump 已正确
-转义），合并输出也走 json.dump——**从源头保证 combined_data.json 永远是合法 JSON**。
+导致后续 json.load 失败。用脚本合并，**合并输出走 json.dump（转义由库负责），产出的
+combined_data.json 恒为合法 JSON**——把"手写整份 JSON"这个大活口消掉。
+
+> 注意：这不等于全链路免疫。你在第2步**就地编辑 table2.json** 填评估内容/方式/佐证
+> 材料时，仍可能把引号写成未转义半角，导致**这里读取 table2.json 就先失败**。所以源头
+> 正文的引号请一律用全角 “ ”；真读失败了，下面的 load_json_or_explain 会给处方式报错。
 
 输入：
   - table2.json ：segment_table2.py 的产出，且已由你（LLM）填好评估内容/方式/佐证材料。
@@ -18,14 +22,15 @@
 用法：
     python merge_tables.py <table2.json> <table3.json> <combined_out.json>
 
-即便某份输入被手工编辑后混入了未转义半角引号，也会先经 robust_json 自动兜底修复。
+若某份输入被手工编辑后混入未转义半角引号，load_json_or_explain 会给出定位到行、
+带一次性正确做法的处方式报错（不静默改文本），按提示改源头引号或重跑即可。
 """
 import sys
 import os
 import json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from robust_json import load_json_tolerant
+from robust_json import load_json_or_explain
 
 
 def main():
@@ -35,8 +40,8 @@ def main():
         sys.exit(1)
     t2_path, t3_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    d2 = load_json_tolerant(t2_path)
-    d3 = load_json_tolerant(t3_path)
+    d2 = load_json_or_explain(t2_path)
+    d3 = load_json_or_explain(t3_path)
 
     table2 = d2.get("table2", d2 if isinstance(d2, list) else [])
     table3_groups = d3.get("table3_groups", d3 if isinstance(d3, list) else [])

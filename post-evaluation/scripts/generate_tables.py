@@ -38,11 +38,11 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 
-# 容错 JSON 加载：报告正文常带引号，模型手写合并 JSON 时易把它写成未转义的半角 "，
-# 直接 json.load 会抛只带字节偏移的 JSONDecodeError（模型看不懂→反复打地鼠）。
-# robust_json 先严格解析、失败再自动修复未转义引号、仍失败给定位到行的可读报错。
+# JSON 加载 + 可读报错：报告正文常带引号，模型手写合并 JSON 时易把它写成未转义的半角 "，
+# 直接 json.load 只抛字节偏移的 JSONDecodeError（模型看不懂→反复 replace/sed 打地鼠）。
+# load_json_or_explain 严格解析，失败则给"定位到行 + 一次性正确做法"的处方式报错（不静默改文本）。
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from robust_json import load_json_tolerant
+from robust_json import load_json_or_explain
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TPL2 = os.path.join(SKILL_DIR, "templates", "表2模板.docx")
@@ -221,7 +221,7 @@ def main():
         sys.exit(1)
     inp, outdir = sys.argv[1], sys.argv[2]
     os.makedirs(outdir, exist_ok=True)
-    data = load_json_tolerant(inp)
+    data = load_json_or_explain(inp)
 
     t2 = data.get("table2", [])
     t3 = data.get("table3_groups", [])

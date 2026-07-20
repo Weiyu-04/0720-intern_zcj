@@ -31,7 +31,7 @@ sidebar_name: 后评估小助手
 - `scripts/segment_table2.py <干净txt> <输出json>` —— **表2 确定性拆行/定主体器**：产出表2骨架（章节标题行"-"、数据行 N.M、多具名单位并列自动拆子行 N.M-1/N.M-2 并标"同上"），填好「整改要求/整改主体」，评估内容/方式/佐证材料**留空给你填**；自报 `_diagnostics`。
 - `scripts/parse_table3.py <干净txt> <输出json>` —— **表3 确定性解析器**：按"四、处理建议"小标题分类、套4类模板、三级分组、编号，产出 `table3_groups` 并自报 `_diagnostics`（分类结果+低置信度告警）。
 - `scripts/merge_tables.py <table2.json> <table3.json> <combined_out.json>` —— **安全合并器**：把第2、3步的两份分表 JSON 合并成 `generate_tables.py` 需要的单一输入，输出走 `json.dump` 保证合法（避免手写整份 JSON 时把正文引号写成未转义半角 `"` 而解析失败）。
-- `scripts/generate_tables.py <数据json> <输出目录>` —— 产出 4 个文件（表2/表3 各 docx+xlsx）。内置 `robust_json.py` 容错加载：未转义半角引号自动修复、其它错误给定位到行的可读报错。
+- `scripts/generate_tables.py <数据json> <输出目录>` —— 产出 4 个文件（表2/表3 各 docx+xlsx）。用 `robust_json.py` 加载：JSON 坏掉时给**定位到行、并告诉你一次性怎么改**的处方式报错（不静默改文本），而非只抛字节偏移。
 
 > **核心分工原则**：**能用代码确定性解析的（表3全流程、取干净文本），一律用脚本，不要纯靠你手抽**——脚本稳定、不漏、可复现；**你的职责是"兜底校验"**：对照原文抓出脚本在这份报告上没覆盖到的边角并修正。真语义判断（表2「评估内容」匹配42条）才由你来做。
 
@@ -86,7 +86,7 @@ sidebar_name: 后评估小助手
 运行：
 `python <本技能目录>/scripts/generate_tables.py /mnt/user-data/workspace/combined_data.json /mnt/user-data/outputs/`
 
-> `generate_tables.py` 已内置容错加载（`robust_json.py`）：万一 JSON 里仍混入未转义的半角引号，会**自动修复并继续**（stderr 打印修复条数）；只有真正的其它语法错误才会中止，并给出**定位到行、带 `^` 指示符**的清晰报错——照着改那一处即可，**不要再逐个 replace 打地鼠**。
+> 万一 JSON 仍坏掉（多半是就地编辑时混入了未转义的半角引号），`generate_tables.py` **不会静默改你的正文**，而是给一条**定位到行、带 `^` 指示符、并写明一次性正确做法**的处方式报错。看到它请**直接照提示走**：优先重跑 `merge_tables.py` 重新生成，或把源头正文的半角 `"` 改成全角 `“ ”` 后重跑。**绝不要逐条 `replace` / `sed` 去改**——引号遍布全文，改不完（会打地鼠）；真要脚本一次性转义，用 `python <本技能目录>/scripts/robust_json.py <文件> --fix`（它是启发式，改完须人工核对）。
 
 脚本会在 outputs 目录下生成**4 个独立文件**：
 - `表2_事故整改和防范措施落实情况评估表.docx` / `.xlsx`
