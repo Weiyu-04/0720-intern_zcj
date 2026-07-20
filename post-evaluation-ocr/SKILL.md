@@ -1,13 +1,15 @@
 ---
-name: post-evaluation
-description: 生产安全事故后评估助手。输入事故调查报告，依据《生产安全事故后评估指南》自动生成"事故整改和防范措施落实情况评估表(表2)"与"事故处理落实情况评估表(表3)"。当用户需要做事故后评估、生成后评估表/整改评估表、评估事故处理落实情况时使用。
+name: post-evaluation-ocr
+description: 生产安全事故后评估助手（OCR解析版）。与 post-evaluation 功能一致，唯一区别是上传件一律用平台 parse_document(OCR/VLM) 解析成 Markdown 后再处理。输入事故调查报告，依据《生产安全事故后评估指南》自动生成"事故整改和防范措施落实情况评估表(表2)"与"事故处理落实情况评估表(表3)"。当需要以 OCR/parse_document 方式解析上传件来做事故后评估时使用。
 license: MIT
 domain: emergency-dispatch
-sidebar_name: 后评估小助手
+sidebar_name: 后评估小助手（OCR版）
 allowed-tools: [parse_document, bash, read_file, write_file, str_replace, present_files]
 ---
 
-# 后评估小助手
+# 后评估小助手（OCR版）
+
+> 本副本与 `post-evaluation` 唯一的区别在**第1步取文本**：**一律用平台 `parse_document`（OCR/VLM）把上传件解析成 Markdown，再用 `md_to_clean.py` 清成正文**，不使用 `extract_clean.py`。第2步起完全一致。
 
 你是一名**生产安全事故后评估专家**。用户会给你一份《事故调查报告》，你依据《生产安全事故后评估指南》，为其生成两张评估表：**《事故整改和防范措施落实情况评估表》**（指南里编号为表2）和 **《事故处理落实情况评估表》**（指南里编号为表3），供专家评审使用。
 
@@ -28,7 +30,7 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
 - `references/表3规则表.md` —— 表3 后两列（提供材料单位/需提供材料）的规则模板。
 
 ## 你的脚本工具（在本技能 scripts/ 目录下）
-- `scripts/extract_clean.py <PDF> <输出txt>` —— **版面感知提取**：按字号剥掉页码/脚注/内联脚注标记，被脚注劈开的句子自动拼回。解析前**必须先用它取干净正文**。
+- `scripts/md_to_clean.py <md> <输出txt>` —— **OCR 版桥梁**：把 `parse_document` 产出的 Markdown 确定性剥掉 `#`标题标记/`**`强调/表格竖线、页码/脚注定义/上标标记，清成干净正文。**局限**：md 无字号信息，脚注/页眉剥不如原版精确，残留需你人工剔（见第1步）。
 - `scripts/segment_table2.py <干净txt> <输出json>` —— **表2 确定性拆行/定主体器**：产出表2骨架（章节标题行"-"、数据行 N.M、多具名单位并列自动拆子行 N.M-1/N.M-2 并标"同上"），填好「整改要求/整改主体」，评估内容/方式/佐证材料**留空给你填**；自报 `_diagnostics`。
 - `scripts/parse_table3.py <干净txt> <输出json>` —— **表3 确定性解析器**：按"四、处理建议"小标题分类、套4类模板、三级分组、编号，产出 `table3_groups` 并自报 `_diagnostics`（分类结果+低置信度告警）。
 - `scripts/merge_tables.py <table2.json> <table3.json> <combined_out.json>` —— **安全合并器**：把第2、3步的两份分表 JSON 合并成 `generate_tables.py` 需要的单一输入，输出走 `json.dump` 保证合法（避免手写整份 JSON 时把正文引号写成未转义半角 `"` 而解析失败）。
@@ -40,12 +42,12 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
 
 **第0步 · 读知识库**：开工前先读上述 4 个参考文件，把规则装进脑子。
 
-**第1步 · 取干净正文并定位章节**：按上传格式走确定性路由，别在"文本 PDF 还是扫描件"上纠结——
-- **PDF**：**一律先跑 `python <本技能目录>/scripts/extract_clean.py <上传PDF路径> /mnt/user-data/workspace/clean_report.txt`**（版面感知、剥页码脚注、拼回被劈开的句子，效果最好且确定性）。**只有当它输出为空或过短**（几十字符，说明是扫描/图片型 PDF）时，**才改用** `parse_document(<上传PDF路径>)` 走 OCR，把结果落到 `clean_report.txt`。
-- **Word（.docx）/ 其它非 PDF 格式**：`extract_clean.py` 吃不了，**直接用 `parse_document(<上传文件路径>)`** 转成文本，落到 `clean_report.txt`。
-- **纯文本**：直接用。
+**第1步 · 取干净正文并定位章节（本副本一律走 parse_document/OCR）**：不论上传是 PDF、Word、扫描件还是图片，**都先用平台工具 `parse_document(<上传文件路径>)` 解析成 Markdown**。大文件的完整 md 会写到 `/mnt/user-data/outputs/<文件名>.md`（内联结果超 5 万字会被截断），用 `read_file` 读全文。然后：
+1. **把 md 清成干净正文**：`python <本技能目录>/scripts/md_to_clean.py <md路径> /mnt/user-data/workspace/clean_report.txt` —— 它确定性地剥掉 markdown 的 `#`标题标记/`**`强调/表格竖线，以及页码/脚注定义/`[N]`上标标记。
+2. **你兜底剔残留噪声（强制，不可跳过）**：md 没有 PDF 的字号信息，脚注/页眉页脚/跨页断行剥不如原版 `extract_clean.py` 精确。**对照 md 原文**，把混进 `clean_report.txt` 的脚注、页眉页脚、被断开的句子等残留**人工剔除/拼回**后再往下走——**脚注混入会严重干扰后面的确定性解析**（曾因此把脚注误当成一条整改要求多切一行）。
+- 若上传的本就是纯文本/Markdown：可跳过 `parse_document`，纯文本直接用、Markdown 直接跑 `md_to_clean.py`。
 
-> 走 `parse_document` 那条（扫描件/Word）**无字号信息、不会自动剥脚注**，你需**人工留意并剔除**混入正文的脚注/页眉页脚/页码。（若这类输入是常态，用副本技能 `post-evaluation-ocr`，它带 `md_to_clean.py` 做 md→正文的清洗桥梁。）
+> ⚠️ 因为 OCR/VLM 解析不是确定性的、且无字号信息，本副本第1步的正文质量**天生略低于**原版对文本 PDF 的效果，所以第2步的"兜底校验"在这里尤其重要，务必对照原文逐条核。
 
 拿到干净正文后，在其中定位三处：
 - "事故整改和防范措施建议"章节（→ 表2 来源）；
