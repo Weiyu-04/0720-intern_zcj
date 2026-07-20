@@ -9,6 +9,7 @@ description: >-
   行业领域，或询问某起事故是否纳入统计时使用。
 domain: emergency-dispatch
 sidebar_name: 事故研判助手
+allowed-tools: [bash, read_file, write_file]
 ---
 
 # 生产安全事故研判助手
