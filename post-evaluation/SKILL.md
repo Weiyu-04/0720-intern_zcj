@@ -30,7 +30,8 @@ sidebar_name: 后评估小助手
 - `scripts/extract_clean.py <PDF> <输出txt>` —— **版面感知提取**：按字号剥掉页码/脚注/内联脚注标记，被脚注劈开的句子自动拼回。解析前**必须先用它取干净正文**。
 - `scripts/segment_table2.py <干净txt> <输出json>` —— **表2 确定性拆行/定主体器**：产出表2骨架（章节标题行"-"、数据行 N.M、多具名单位并列自动拆子行 N.M-1/N.M-2 并标"同上"），填好「整改要求/整改主体」，评估内容/方式/佐证材料**留空给你填**；自报 `_diagnostics`。
 - `scripts/parse_table3.py <干净txt> <输出json>` —— **表3 确定性解析器**：按"四、处理建议"小标题分类、套4类模板、三级分组、编号，产出 `table3_groups` 并自报 `_diagnostics`（分类结果+低置信度告警）。
-- `scripts/generate_tables.py <数据json> <输出目录>` —— 产出 4 个文件（表2/表3 各 docx+xlsx）。
+- `scripts/merge_tables.py <table2.json> <table3.json> <combined_out.json>` —— **安全合并器**：把第2、3步的两份分表 JSON 合并成 `generate_tables.py` 需要的单一输入，输出走 `json.dump` 保证合法（避免手写整份 JSON 时把正文引号写成未转义半角 `"` 而解析失败）。
+- `scripts/generate_tables.py <数据json> <输出目录>` —— 产出 4 个文件（表2/表3 各 docx+xlsx）。内置 `robust_json.py` 容错加载：未转义半角引号自动修复、其它错误给定位到行的可读报错。
 
 > **核心分工原则**：**能用代码确定性解析的（表3全流程、取干净文本），一律用脚本，不要纯靠你手抽**——脚本稳定、不漏、可复现；**你的职责是"兜底校验"**：对照原文抓出脚本在这份报告上没覆盖到的边角并修正。真语义判断（表2「评估内容」匹配42条）才由你来做。
 
@@ -71,8 +72,22 @@ sidebar_name: 后评估小助手
 3. 处理情况、说明留空。
 > 分工逻辑：代码保证"行结构/分组/序号/模板"稳定不漏，你只补代码在这份报告上没覆盖到的边角——两者结合最准、最不过拟合。
 
-**第4步 · 产出文件（表2、表3 各 Word+Excel，共 4 个，务必分开导出）**：把第2步校验并填好的 `table2` 与第3步校验后的 `table3_groups` **合并成一个 JSON**（`{"table2":[…], "table3_groups":[…]}`，结构见 `scripts/generate_tables.py` 顶部说明），运行：
-`python <本技能目录>/scripts/generate_tables.py <数据.json> /mnt/user-data/outputs/`
+**第4步 · 产出文件（表2、表3 各 Word+Excel，共 4 个，务必分开导出）**：把第2步校验并填好的 `table2` 与第3步校验后的 `table3_groups` 合并成一个 JSON（`{"table2":[…], "table3_groups":[…]}`，结构见 `scripts/generate_tables.py` 顶部说明），再运行 `generate_tables.py`。
+
+> **⚠️ 合并方式：优先用脚本，不要纯手写整份 JSON。**
+> 报告正文里经常带引号（如「参见报告"三、（三）存在的问题"」）。手写/重排大段中文时，
+> 极易把这种引号写成**未转义的半角 `"`**，它会让 JSON 解析在字符串中途"提前结束"，
+> 报 `Expecting ',' delimiter`——一旦踩坑就会陷入反复 replace 打地鼠。**两条规避办法（任选，建议都遵守）**：
+> 1. **用合并脚本**（推荐）：第2、3步的 `table2.json`、`table3.json` 都是脚本用 `json.dump` 写出的合法 JSON。直接合并，别重打：
+>    `python <本技能目录>/scripts/merge_tables.py <table2.json> <table3.json> /mnt/user-data/workspace/combined_data.json`
+>    （你在第2步填评估内容/方式/佐证材料时，是**就地编辑 table2.json**，不要另起炉灶重写整份。）
+> 2. **正文引号一律用全角 `“ ”`**，不要用半角 `"`；确需半角时写成转义的 `\"`。
+
+运行：
+`python <本技能目录>/scripts/generate_tables.py /mnt/user-data/workspace/combined_data.json /mnt/user-data/outputs/`
+
+> `generate_tables.py` 已内置容错加载（`robust_json.py`）：万一 JSON 里仍混入未转义的半角引号，会**自动修复并继续**（stderr 打印修复条数）；只有真正的其它语法错误才会中止，并给出**定位到行、带 `^` 指示符**的清晰报错——照着改那一处即可，**不要再逐个 replace 打地鼠**。
+
 脚本会在 outputs 目录下生成**4 个独立文件**：
 - `表2_事故整改和防范措施落实情况评估表.docx` / `.xlsx`
 - `表3_事故处理落实情况评估表.docx` / `.xlsx`
