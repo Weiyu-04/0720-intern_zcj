@@ -1,6 +1,6 @@
 ---
 name: post-evaluation
-description: 生产安全事故后评估助手。输入事故调查报告，依据《生产安全事故后评估指南》自动生成"事故整改和防范措施落实情况评估表(表2)"与"事故处理落实情况评估表(表3)"。当用户需要做事故后评估、生成后评估表/整改评估表、评估事故处理落实情况时使用。
+description: 生产安全事故后评估助手。输入一份《事故调查报告》，依据《生产安全事故后评估指南》自动生成《事故整改和防范措施落实情况评估表》与《事故处理落实情况评估表》两张评估表（各含 Word 与 Excel），供专家评审。当用户需要对事故调查报告做后评估、生成后评估表/整改落实评估表/处理落实评估表时使用；本技能不做事发初期的警情研判与事故分类分级。
 license: MIT
 domain: emergency-dispatch
 sidebar_name: 后评估小助手
@@ -33,6 +33,7 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
 - `scripts/parse_table3.py <干净txt> <输出json>` —— **表3 确定性解析器**：按"四、处理建议"小标题分类、套4类模板、三级分组、编号，产出 `table3_groups` 并自报 `_diagnostics`（分类结果+低置信度告警）。
 - `scripts/merge_tables.py <table2.json> <table3.json> <combined_out.json>` —— **安全合并器**：把第2、3步的两份分表 JSON 合并成 `generate_tables.py` 需要的单一输入，输出走 `json.dump` 保证合法（避免手写整份 JSON 时把正文引号写成未转义半角 `"` 而解析失败）。
 - `scripts/generate_tables.py <数据json> <输出目录>` —— 产出 4 个文件（表2/表3 各 docx+xlsx）。用 `robust_json.py` 加载：JSON 坏掉时给**定位到行、并告诉你一次性怎么改**的处方式报错（不静默改文本），而非只抛字节偏移。
+- `scripts/robust_json.py <文件> [--fix]` —— **JSON 校验闸/兜底**：`robust_json.py <文件>` 只校验，坏了给处方式报错（第2/3步"填完立刻校验"就用它）；加 `--fix` 做一次性启发式转义并写回（**会改文本，改完须人工核对**）。
 
 > **核心分工原则**：**能用代码确定性解析的（表3全流程、取干净文本），一律用脚本，不要纯靠你手抽**——脚本稳定、不漏、可复现；**你的职责是"兜底校验"**：对照原文抓出脚本在这份报告上没覆盖到的边角并修正。真语义判断（表2「评估内容」匹配42条）才由你来做。
 
@@ -41,11 +42,11 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
 **第0步 · 读知识库**：开工前先读上述 4 个参考文件，把规则装进脑子。
 
 **第1步 · 取干净正文并定位章节**：按上传格式走确定性路由，别在"文本 PDF 还是扫描件"上纠结——
-- **PDF**：**一律先跑 `python <本技能目录>/scripts/extract_clean.py <上传PDF路径> /mnt/user-data/workspace/clean_report.txt`**（版面感知、剥页码脚注、拼回被劈开的句子，效果最好且确定性）。**只有当它输出为空或过短**（几十字符，说明是扫描/图片型 PDF）时，**才改用** `parse_document(<上传PDF路径>)` 走 OCR，把结果落到 `clean_report.txt`。
+- **PDF**：**一律先跑 `python <本技能目录>/scripts/extract_clean.py <上传PDF路径> /mnt/user-data/workspace/clean_report.txt`**（版面感知、剥页码脚注、拼回被劈开的句子，效果最好且确定性）。**只有当它抽出的正文少于约 200 字符**（基本是扫描/图片型 PDF、无文本层）时，**才改用** `parse_document(<上传PDF路径>)` 走 OCR，把结果落到 `clean_report.txt`。
 - **Word（.docx）/ 其它非 PDF 格式**：`extract_clean.py` 吃不了，**直接用 `parse_document(<上传文件路径>)`** 转成文本，落到 `clean_report.txt`。
 - **纯文本**：直接用。
 
-> 走 `parse_document` 那条（扫描件/Word）**无字号信息、不会自动剥脚注**，你需**人工留意并剔除**混入正文的脚注/页眉页脚/页码。（若这类输入是常态，用副本技能 `post-evaluation-ocr`，它带 `md_to_clean.py` 做 md→正文的清洗桥梁。）
+> **走 `parse_document` 那条（扫描件/Word）的必做清洗**：它产出的是 **Markdown**、且无字号信息，直接喂给第2步的确定性拆行器会错切行。进第2步前**务必先剔除**：① markdown 标记——`#` 标题号、`**` 强调、`|表格|` 竖线、`[N]` 上标脚注标记；② 脚注、页眉页脚、页码。（脚注/标记混入会严重干扰解析。）**扫描件/影印件报告较多时，改用「后评估小助手（扫描件版）」更稳**——它内置 `md_to_clean.py` 自动做这道 md→正文清洗。
 
 拿到干净正文后，在其中定位三处：
 - "事故整改和防范措施建议"章节（→ 表2 来源）；
@@ -80,7 +81,7 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
    - 后两列是否符合 `表3规则表.md` 模板（含单位/个人措辞、同一人受两种处理应两组各列一次、不予追究人员不收录）。
    **只修真正的差异，代码已抽对的行不要重写**（保持稳定）。校验后的 JSON 即表3 数据。
 3. 处理情况、说明留空。
-4. **若你就地改过 table3.json，改完立刻校验（强制）**：`python <本技能目录>/scripts/robust_json.py /mnt/user-data/workspace/table3.json`——同第2步，报错按提示当场改好（多半是把半角引号改成全角）；`OK` 才进第4步。
+4. **兜底校验后立刻校验 JSON（强制，不可跳过）**：`python <本技能目录>/scripts/robust_json.py /mnt/user-data/workspace/table3.json`——第2步兜底校验几乎必然改过 table3.json，务必跑一次；报错按提示当场改好（多半是把半角引号改成全角），见 `OK` 才进第4步。
 > 分工逻辑：代码保证"行结构/分组/序号/模板"稳定不漏，你只补代码在这份报告上没覆盖到的边角——两者结合最准、最不过拟合。
 
 **第4步 · 产出文件（表2、表3 各 Word+Excel，共 4 个，务必分开导出）**：把第2步校验并填好的 `table2` 与第3步校验后的 `table3_groups` 合并成一个 JSON（`{"table2":[…], "table3_groups":[…]}`，结构见 `scripts/generate_tables.py` 顶部说明），再运行 `generate_tables.py`。
@@ -104,7 +105,7 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
 - `表3_事故处理落实情况评估表.docx` / `.xlsx`
 docx 用官方模板、xlsx 忠实镜像同版式，两者数据同源。**不要把多张表合并进一个文件。**
 
-**第5步 · 交付（三样都要输出，缺一不可）**：
+**第5步 · 交付（两样都要输出，缺一不可）**：
 1. **4 个文件（表2/表3 的 .docx 与 .xlsx）**：用 `present_files` 把**4 个文件全部**交付给用户下载/预览，一个都不能漏；
 2. **思考过程（真实推理，边做边想）**：本系统会**自动把你的实时思考展示给用户**。因此你要在**生成过程中就把每一步推理真实、完整地想出来**，而不是事后另编一段总结。你的思考必须覆盖关键判断：
    - 每条整改要求的**评估内容是怎么匹配到的**——A路关键词命中了什么、B路语义判断的结果、两路是否一致、拿不准时如何对照"区分边界"裁定，并引用整改要求原话；
