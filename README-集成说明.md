@@ -60,6 +60,34 @@ MainAgent/backend/skills/public/
 
 **别只拷 .py**：`production-safety-accident-review/scripts/data/` 下两个 json（`gbt4754.json` 1381 个行业小类、`geo.json` 全国省地县）是硬依赖，脚本用 `os.path.dirname(__file__)` 相对定位。`post-evaluation/templates/` 下是二进制 docx 模板，`generate_tables.py` 靠它克隆行，也无法从文本重建。（`.bak` 是改动前的原件，不参与运行，删了也行。）
 
+## 扫描件 / Word 走 OCR：MinerU 配置（post-evaluation 用）
+
+`post-evaluation` 第1步取正文的路由是：**文本型 PDF 先用 `extract_clean.py`**（PyMuPDF 抽文本）；**抽不到字的扫描件/图片型 PDF、以及 Word 等非 PDF，退回平台工具 `parse_document`**。
+
+而 `parse_document` 底层调的是 **MinerU SDK**（打一个 OpenAI 兼容的 VLM 服务），**没配置或 `server_url`/`api_key` 为空时会退回 markitdown——markitdown 不做 OCR/表格识别**。所以：**要让扫描件 PDF 真正能出字，必须配好 MinerU；不配的话扫描件会被抽空，后评估拿不到正文。**（文本型 PDF 不受影响，走 `extract_clean.py` 即可。）
+
+**① `config.yaml` 加 `knowledge` 段**（`server_url` 填你们的 MinerU 服务地址）：
+
+```yaml
+knowledge:
+  enabled: true
+  backend: vlm-http-client
+  server_url: http://220.248.124.138:13889   # 你们的 MinerU VLM 服务
+  api_key: $MINERU_API_KEY                    # 只放 env 引用，别把明文 key 写进这里
+  language: ch
+```
+
+**② `.env` 填 key**（`.env` 应在 `.gitignore` 内，**切勿把真实 key 提交进仓库**）：
+
+```dotenv
+MINERU_API_KEY=<你的 MinerU key>
+MINERU_VL_API_KEY=<你的 MinerU key>   # MinerU SDK 内部读取的变量名，一并设上，避免只设一个不生效
+```
+
+**③ 装 SDK**：`uv pip install mineru==3.1.5`（或 `pip install mineru==3.1.5`）。
+
+> 安全提醒：`config.yaml` 里只写 `$MINERU_API_KEY` 这种引用，真实密钥只放 `.env`。本仓库不保存任何密钥。
+
 ## 跟 OnlyOffice 的关系
 
 **跑这两个技能不需要 OnlyOffice。** 4 个产出文件的下载走的是 `/api/threads/{id}/artifacts?download=true`，跟 `/api/onlyoffice/*` 是完全独立的两条路由，不装 OnlyOffice 照样能下载，只是 docx/xlsx 没法在线预览。
