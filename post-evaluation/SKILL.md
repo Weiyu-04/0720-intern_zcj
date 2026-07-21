@@ -28,7 +28,8 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
 - `references/表3规则表.md` —— 表3 后两列（提供材料单位/需提供材料）的规则模板。
 
 ## 你的脚本工具（在本技能 scripts/ 目录下）
-- `scripts/extract_clean.py <PDF> <输出txt>` —— **版面感知提取**：按字号剥掉页码/脚注/内联脚注标记，被脚注劈开的句子自动拼回。解析前**必须先用它取干净正文**。
+- `scripts/extract_clean.py <PDF> <输出txt>` —— **文本型 PDF 的版面感知提取**：按字号剥掉页码/脚注/内联脚注标记，被脚注劈开的句子自动拼回。文本型 PDF 走这条。
+- `scripts/md_to_clean.py <md> <输出txt>` —— **OCR 路的清洗桥梁**：把 `parse_document` 产出的 Markdown 确定性剥成正文（`#`标题/`**`强调/表格竖线/`[N]`上标/脚注定义/页码）。扫描件/Word 等非文本 PDF 走这条。**局限**：无字号信息，脚注剥不如 `extract_clean` 精确，残留需人工补剔（见第1步）。
 - `scripts/segment_table2.py <干净txt> <输出json>` —— **表2 确定性拆行/定主体器**：产出表2骨架（章节标题行"-"、数据行 N.M、多具名单位并列自动拆子行 N.M-1/N.M-2 并标"同上"），填好「整改要求/整改主体」，评估内容/方式/佐证材料**留空给你填**；自报 `_diagnostics`。
 - `scripts/parse_table3.py <干净txt> <输出json>` —— **表3 确定性解析器**：按"四、处理建议"小标题分类、套4类模板、三级分组、编号，产出 `table3_groups` 并自报 `_diagnostics`（分类结果+低置信度告警）。
 - `scripts/merge_tables.py <table2.json> <table3.json> <combined_out.json>` —— **安全合并器**：把第2、3步的两份分表 JSON 合并成 `generate_tables.py` 需要的单一输入，输出走 `json.dump` 保证合法（避免手写整份 JSON 时把正文引号写成未转义半角 `"` 而解析失败）。
@@ -41,12 +42,14 @@ allowed-tools: [parse_document, bash, read_file, write_file, str_replace, presen
 
 **第0步 · 读知识库**：开工前先读上述 4 个参考文件，把规则装进脑子。
 
-**第1步 · 取干净正文并定位章节**：按上传格式走确定性路由，别在"文本 PDF 还是扫描件"上纠结——
-- **PDF**：**一律先跑 `python <本技能目录>/scripts/extract_clean.py <上传PDF路径> /mnt/user-data/workspace/clean_report.txt`**（版面感知、剥页码脚注、拼回被劈开的句子，效果最好且确定性）。**只有当它抽出的正文少于约 200 字符**（基本是扫描/图片型 PDF、无文本层）时，**才改用** `parse_document(<上传PDF路径>)` 走 OCR，把结果落到 `clean_report.txt`。
-- **Word（.docx）/ 其它非 PDF 格式**：`extract_clean.py` 吃不了，**直接用 `parse_document(<上传文件路径>)`** 转成文本，落到 `clean_report.txt`。
+**第1步 · 取干净正文并定位章节**：按上传格式走确定性路由。**两条路都先经一道确定性清洗、都落到同一个 `/mnt/user-data/workspace/clean_report.txt` 再进第2步**，让下游拿到的输入对等：
+- **PDF（有文本层）**：跑 `python <本技能目录>/scripts/extract_clean.py <上传PDF路径> /mnt/user-data/workspace/clean_report.txt`（版面感知、按字号剥页码脚注、拼回被劈开的句子，确定性）。**若抽出正文少于约 200 字符**（基本是扫描/图片型 PDF、无文本层），转下面「OCR 路」。
+- **OCR 路（扫描件/图片型 PDF、Word（.docx）、其它非 PDF）**：`extract_clean.py` 吃不了，改走两步——
+  1. `parse_document(<上传文件路径>)` 转成 Markdown（完整 md 写到 `/mnt/user-data/outputs/<名>.md`，用 `read_file` 读全文）；
+  2. **跑 `python <本技能目录>/scripts/md_to_clean.py <md路径> /mnt/user-data/workspace/clean_report.txt`**，把 md 确定性清成正文（剥 `#` 标题号 / `**` 强调 / `|表格|` 竖线 / `[N]` 上标 / 脚注定义 / 页码）。
 - **纯文本**：直接用。
 
-> **走 `parse_document` 那条（扫描件/Word）的必做清洗**：它产出的是 **Markdown**、且无字号信息，直接喂给第2步的确定性拆行器会错切行。进第2步前**务必先人工剔除**：① markdown 标记——`#` 标题号、`**` 强调、`|表格|` 竖线、`[N]` 上标脚注标记；② 脚注、页眉页脚、页码。（脚注/标记混入会严重干扰解析，务必清干净再进第2步。）
+> **两条路的对等与固有差距（务必知悉）**：走到这里两条路都产出了 `clean_report.txt`，**"清洗"这一步已对等**（都由确定性脚本做，非手工）。但 OCR 路有两点 PDF 路没有、且**清洗补不回来**的固有差距：① `md_to_clean.py` 无字号信息，脚注只能按 `[N]`/`[^N]:`/页码等**文本模式**剥，**漏网的脚注/页眉/页脚你要对照 md 原文人工补剔**；② OCR 可能**认错字**（碰"照抄原文一字不改"铁律——人名、数字、生僻字尤其要核）。因此**走 OCR 路时，第2/3步的兜底校验要更严**，逐条对照 md 原文。
 
 拿到干净正文后，在其中定位三处：
 - "事故整改和防范措施建议"章节（→ 表2 来源）；

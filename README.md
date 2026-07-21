@@ -37,7 +37,7 @@
 - **加 `allowed-tools` 白名单**（收窄工具面、禁掉自由发挥）：
   - `post-evaluation`：`[parse_document, bash, read_file, write_file, str_replace, present_files]`
   - `production-safety-accident-review`：`[bash, read_file, write_file]`（**刻意不含任何 web 工具**，从工具层坐实"绝不上网查主营"）
-- **第1步取文本改确定性路由**：PDF 一律先 `extract_clean.py`，抽出正文 < 约200字符（扫描/图片件）才退回 `parse_document`；Word/非 PDF 直接 `parse_document`。走 `parse_document` 的（扫描件/Word）产出是 Markdown，进第2步前须**人工剔除 markdown 标记 + 脚注页眉**（脚注混入会严重干扰确定性解析）。
+- **第1步取文本 = 两条对等路由**：①**文本型 PDF** → `extract_clean.py`（按字号剥脚注/页码）；②**扫描件/图片型 PDF / Word / 其它非 PDF** → `parse_document`(OCR) → **`md_to_clean.py`** 把 md 确定性清成正文。**两条路都经一道确定性清洗、都落到同一个 `clean_report.txt` 再进第2步**，下游拿到的输入对等。OCR 路残留脚注需人工补剔、且 OCR 可能认错字（见"已知局限"），故其第2/3步兜底校验要更严。
   - > 扫描件 PDF 的 OCR 由平台 `parse_document`（底层 MinerU）提供，**这属 MainAgent 部署侧配置，技能不管**。
 - **description 规范化**：三个技能描述去跨技能引用、去实现泄露、触发改用用户可观测条件、各加排他边界（后评估↔研判互不越界）。
 - **OCR 变体（曾建 `post-evaluation-ocr`）已移除**：它对编排模型没有独立可观测的触发点（"要不要走 OCR"是执行期才知道的事，用户不会这么说），与主技能触发不可区分、易挑花眼。扫描件能力保留在 `post-evaluation` 的 parse_document 回退分支里。
@@ -63,9 +63,9 @@
 3. **技能正式上线方式待带教确认**：`skills/` 是 gitignored；平台代码里有 `POST /api/skills/upload?scope=public`（管理员上传 `.skill` 包），但那是从代码看到的机制，**须确认公司流程**。
 4. **后续阶段**：表1（人工补，附盖章自评估报告）；评估报告生成（本期不做）。
 
-**已讨论、未实施的可选增强**（要不要做由后续定）：
-5. **post-evaluation 并入 `md_to_clean.py`**：现在 docx/扫描件走 `parse_document` 出的 Markdown 靠模型手工剔标记（`#`/`**`/表格/`[N]`+脚注），偏粗。把 md→正文清洗脚本并进主技能，可让 doc/docx/扫描件都**自动清洗**、和文本 PDF 一样省心。（曾在 OCR 变体里实现过，变体已删。）
-6. **第1步加"乱码/有效性判定 → OCR 回退"**：见下"已知局限"。
+**增强项**：
+5. ✅ **（已完成）post-evaluation 并入 `md_to_clean.py`**：OCR 路（扫描件/Word/非 PDF）现在 `parse_document` 出 md 后**自动跑 `md_to_clean.py` 确定性清洗**（剥 `#`/`**`/表格/`[N]`/脚注定义/页码），和 PDF 路一样"先清洗再进第2步"，**清洗这一步两条路已对等**。残留差距（脚注按模式非字号剥、OCR 认错字）见"已知局限"。
+6. **（未做）第1步加"乱码/有效性判定 → OCR 回退"**：见下"已知局限"。
 
 > **⚠️ 输入处理已知局限（重要）**：`extract_clean.py` 只处理**版面噪声**（页码/脚注/断句），**不修字符层面的乱码**——PDF 内嵌字体的 ToUnicode 映射坏/缺时，抽出来是错字，脚本原样穿过（garbage in/out）。现路由只在 `extract_clean` 抽**空**（扫描件）时才退 `parse_document(OCR)`，**乱码 PDF 有文本层、非空 → 不触发回退**。好在乱码不会静默出错表（下游 `segment_table2`/`parse_table3` 找不到"五、事故整改""（一）"等中文锚点 → 产空骨架 → 模型兜底校验会发现），但要人工改走 OCR 才能修（OCR 认像素、绕过坏字体映射）。**根治办法 = 待办 6**：抽完自检"章节锚点缺失 + CJK 有效字符占比异常低 → 判乱码、和扫描件一样自动退 OCR"。
 
