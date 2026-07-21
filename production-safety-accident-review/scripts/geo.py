@@ -25,6 +25,11 @@ _NAME_INDEX = None
 # 地级占位名（直辖市/省直辖下的虚层），不作为可匹配地名，但保留用于链路上溯
 _PLACEHOLDER = {"市辖区", "县", "省直辖县级行政区划", "直辖县", "自治区直辖县级行政区划"}
 
+# 通用地域词型县名：这些行政区名同时也是"老城区/城区/郊区"一类通用泛地域说法。当归一**仅凭它**
+# 定到某县、且文本又没给省/市锚点时，可能是泛指而非确指该区（如"在老城区的工地"未必指洛阳老城区）。
+# 命中只**附核实提示、不改归一结果**（同名多个的已走歧义分支拦截，这里只兜住"同名唯一"被静默确指）。
+_GENERIC_AREA = frozenset({"城区", "郊区", "老城区", "新城区", "城关区", "矿区"})
+
 
 def _load():
     global _G, _NAME_INDEX
@@ -174,6 +179,12 @@ def normalize(text: str) -> dict:
     loc = "·".join(x["name"] for x in (result["省"], result["地级"], result["县级"]) if x)
     result["basis"] = (f"事故发生地归一为「{loc}」（{'直辖市' if is_muni else '一般省份'}），"
                        f"由该地应急管理部门负责统计（《生产安全事故统计调查制度》一般规则第22条）。")
+    # 通用地域词型县名 + 文本无省/市锚点 → 归一可能是泛指，附核实提示（只提示、不改归一结果）。
+    if level_resolved == "县" and not prov and not pref:
+        cn = (result["县级"] or {}).get("name", "")
+        if cn in _GENERIC_AREA:
+            result["注意"] = (f"「{cn}」既是行政区名、也是常见泛地域说法，且文本未给省/市锚点；"
+                              f"归一到「{loc}」系按同名唯一区推定，请据警情核实是否确指该区。")
     return result
 
 
@@ -218,6 +229,14 @@ def _selftest():
     # 有省市则消歧
     fixed = normalize("天津市河东区")
     assert fixed["ok"] and fixed["县级"]["name"] == "河东区" and fixed["省"]["name"] == "天津市"
+    # 通用地域词型县名(老城区,库中唯一属洛阳) + 无省市锚点 → 附核实提示（不改归一结果）
+    r_area = normalize("在老城区的工地")
+    assert r_area["ok"] and r_area.get("注意") and r_area["县级"]["name"] == "老城区", r_area
+    # 有省/市锚点(洛阳市) → 确指，不提示
+    r_anc = normalize("洛阳市老城区某厂")
+    assert r_anc["ok"] and "注意" not in r_anc, r_anc
+    # 普通具体区名不触发提示
+    assert "注意" not in normalize("浙江省杭州市余杭区某路")
     print("selftest OK")
 
 
@@ -241,6 +260,8 @@ if __name__ == "__main__":
             if res["remainder"]:
                 print(f"县级以下：{res['remainder']}")
             print(f"依据：{res['basis']}")
+            if res.get("注意"):
+                print(f"注意：{res['注意']}")
         elif res.get("ambiguous"):
             print(f"地名歧义：{res['note']}")
             for c in res["candidates"]:

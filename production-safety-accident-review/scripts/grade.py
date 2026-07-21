@@ -89,13 +89,22 @@ def grade(deaths=None, serious_injuries=None, direct_loss_wan=None) -> dict:
         serious_injuries  重伤人数（含急性工业中毒），非负整数或 None
         direct_loss_wan   直接经济损失（万元），非负数或 None
     """
-    # 校验已知维度
+    # 校验已知维度。注意 bool 是 int 的子类，True/False 会被 isinstance(x,int) 放行
+    # （True 当 1、False 当 0），须显式挡掉，避免把布尔误当人数定级。
+    if isinstance(deaths, bool) or isinstance(serious_injuries, bool) or isinstance(direct_loss_wan, bool):
+        raise ValueError("死亡/重伤/损失不接受布尔值（bool），请传非负数或 None。")
     if deaths is not None and (not isinstance(deaths, int) or deaths < 0):
         raise ValueError(f"死亡人数必须为非负整数或 None，收到：{deaths!r}")
     if serious_injuries is not None and (not isinstance(serious_injuries, int) or serious_injuries < 0):
         raise ValueError(f"重伤人数必须为非负整数或 None，收到：{serious_injuries!r}")
-    if direct_loss_wan is not None and float(direct_loss_wan) < 0:
-        raise ValueError(f"直接经济损失（万元）必须为非负数或 None，收到：{direct_loss_wan!r}")
+    if direct_loss_wan is not None:
+        # 非数值字符串等直接 float() 会抛裸 ValueError（无上下文），转成友好报错。
+        try:
+            _loss = float(direct_loss_wan)
+        except (TypeError, ValueError):
+            raise ValueError(f"直接经济损失（万元）必须为非负数或 None，收到：{direct_loss_wan!r}")
+        if _loss < 0:
+            raise ValueError(f"直接经济损失（万元）必须为非负数或 None，收到：{direct_loss_wan!r}")
 
     known, unknown = {}, []
     if deaths is not None:
@@ -191,6 +200,19 @@ def _selftest() -> None:
     assert r4["level"] == "重大" and r4["drivers"] == ["重伤"]
     # 三维全未掌握 → 无法判定
     assert not grade()["ok"]
+    # 健壮性：bool 不被当作 int 放行（True 会被误当 1 人死亡）
+    for bad in (True, False):
+        try:
+            grade(deaths=bad)
+            assert False, "bool 应被拒"
+        except ValueError:
+            pass
+    # 健壮性：非数值损失给友好 ValueError 而非裸 float() 报错
+    try:
+        grade(direct_loss_wan="很多")
+        assert False, "非数值损失应被拒"
+    except ValueError:
+        pass
     print("selftest OK")
 
 
