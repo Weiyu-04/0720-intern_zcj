@@ -157,7 +157,37 @@ def parse(text):
             "小标题分类": classified, "处罚机关(现抽)": agency, "warnings": warn or ["无"]}
     return {"table3_groups": [{"group_title": None, "rows": rows}], "_diagnostics": diag}
 
+
+def _selftest():
+    """回归：企业内部处理固定排在其他处理之前（客户口径 / 表3规则表.md §二「务必遵守」）。
+    防"速度重构"或误改把两块顺序调回去。构造同时含"其他主管部门处理"和"企业内部处分"
+    两组的最小虚构报告（全占位名，不含任何真实案例答案），断言相对顺序与组号。"""
+    rpt = (
+        "四、对有关责任人员及单位的处理建议\n"
+        "（一）建议给予行政处罚的单位\n"
+        "1. 某某有限公司，建议某某县应急管理局对某某有限公司依法予以行政处罚。\n"
+        "（二）建议行业主管部门处理的单位\n"
+        "建议某某县市场监督管理局对某某租赁有限公司依法依规给予处理。\n"
+        "（三）建议企业内部处分的人员\n"
+        "1. 某某，某某有限公司安全员，建议由某某有限公司给予其记过处分。\n"
+        "五、事故整改和防范措施\n"
+    )
+    order = [(r["no"], r["person"]) for r in parse(rpt)["table3_groups"][0]["rows"]
+             if r["person"] in GROUP_TITLES]
+    names = [p for _, p in order]
+    assert "企业内部处理情况" in names and "其他处理情况" in names, ("两组都应出现", order)
+    # 相对顺序：内部必须排在其他之前（不依赖是否有刑事组，故用相对位置而非绝对组号3/4）
+    assert names.index("企业内部处理情况") < names.index("其他处理情况"), \
+        ("企业内部处理必须排在其他处理之前", order)
+    numof = {p: int(n) for n, p in order}
+    assert numof["企业内部处理情况"] < numof["其他处理情况"], ("组号应内部<其他", order)
+    print("selftest OK")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
+        _selftest()
+        sys.exit(0)
     data = parse(open(sys.argv[1], encoding="utf-8").read())
     for r in data["table3_groups"][0]["rows"]:
         if r["person"] in GROUP_TITLES:
